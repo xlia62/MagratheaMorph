@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Magratheamorph"
+version = "0.1.0"
+description = "Standalone DEM time-series river fish speciation model."
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+vtu = ["meshio>=5"]
+vtk = ["meshio>=5"]
+mesh = ["meshio>=5"]
+test = ["pytest>=7"]
+notebook = ["jupyter>=1", "matplotlib>=3.7"]
+
+[project.scripts]
+magratheamorph = "magratheamorph.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
