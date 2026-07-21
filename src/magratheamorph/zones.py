@@ -52,6 +52,8 @@ class ZoneExtractor:
         min_zone_cells: int = 1,
         gap_tolerance_cells: int = 0,
         habitat_mode: str = "drainage",
+        min_lake_depth: float = 0.0,
+        max_lake_depth: float | None = None,
     ):
         if connectivity not in (4, 8):
             raise ValueError("connectivity must be 4 or 8")
@@ -59,12 +61,21 @@ class ZoneExtractor:
             raise ValueError("min_zone_cells must be at least 1")
         if gap_tolerance_cells < 0:
             raise ValueError("gap_tolerance_cells must be non-negative")
-        if habitat_mode not in {"drainage", "elevation", "drainage_and_elevation"}:
-            raise ValueError("habitat_mode must be 'drainage', 'elevation', or 'drainage_and_elevation'")
+        if habitat_mode not in {"drainage", "elevation", "drainage_and_elevation", "drainage_or_shallow_lake"}:
+            raise ValueError(
+                "habitat_mode must be 'drainage', 'elevation', 'drainage_and_elevation', "
+                "or 'drainage_or_shallow_lake'"
+            )
+        if min_lake_depth < 0:
+            raise ValueError("min_lake_depth must be non-negative")
+        if max_lake_depth is not None and max_lake_depth < min_lake_depth:
+            raise ValueError("max_lake_depth must be greater than or equal to min_lake_depth")
         self.min_drainage_area = min_drainage_area
         self.min_zone_cells = min_zone_cells
         self.gap_tolerance_cells = gap_tolerance_cells
         self.habitat_mode = habitat_mode
+        self.min_lake_depth = min_lake_depth
+        self.max_lake_depth = max_lake_depth
         self.min_elevation = min_elevation
         self.max_elevation = max_elevation
         self.use_catchments = use_catchments
@@ -96,14 +107,23 @@ class ZoneExtractor:
             habitat = elevation_mask
         elif self.habitat_mode == "drainage_and_elevation":
             habitat = drainage_mask & elevation_mask
+        elif self.habitat_mode == "drainage_or_shallow_lake":
+            lake_submerged_mask = self._lake_submerged_mask(frame)
+            exposed_drainage = drainage_mask & ~lake_submerged_mask
+            shallow_lake = self._shallow_lake_mask(frame) & ~drainage_mask
+            habitat = exposed_drainage | shallow_lake
         else:
-            habitat = drainage_mask & elevation_mask
+            habitat = self._exposed_drainage_mask(frame, drainage_mask) & elevation_mask
 
         if self.gap_tolerance_cells:
             habitat = self._bridge_small_gaps(habitat)
+        if frame.water_depth is not None and self.habitat_mode in {"drainage", "drainage_or_shallow_lake"}:
+            habitat &= ~(drainage_mask & self._water_submerged_mask(frame))
         catchment = (
             frame.catchment
-            if self.use_catchments and self.habitat_mode != "elevation" and not self.gap_tolerance_cells
+            if self.use_catchments
+            and self.habitat_mode not in {"elevation", "drainage_or_shallow_lake"}
+            and not self.gap_tolerance_cells
             else None
         )
         labels, zones = self._label_components(habitat, catchment, frame.time)
@@ -127,6 +147,38 @@ class ZoneExtractor:
         if self.max_elevation is not None:
             mask &= frame.elevation <= self.max_elevation
         return mask
+
+    def _shallow_lake_mask(self, frame: DemFrame) -> np.ndarray:
+        if self.max_lake_depth is None:
+            raise ValueError("max_lake_depth is required for drainage_or_shallow_lake habitat mode")
+        if frame.water_depth is None:
+            raise ValueError("water_depth is required for drainage_or_shallow_lake habitat mode")
+        water_depth = np.asarray(frame.water_depth)
+        return (
+            np.isfinite(water_depth)
+            & (water_depth >= self.min_lake_depth)
+            & (water_depth <= self.max_lake_depth)
+        )
+
+    def _lake_submerged_mask(self, frame: DemFrame) -> np.ndarray:
+        if frame.water_depth is None:
+            raise ValueError("water_depth is required for drainage_or_shallow_lake habitat mode")
+        return self._water_submerged_mask(frame)
+
+    def _water_submerged_mask(self, frame: DemFrame) -> np.ndarray:
+        if frame.water_depth is None:
+            return np.zeros(frame.elevation.shape, dtype=bool)
+        water_depth = np.asarray(frame.water_depth)
+        return np.isfinite(water_depth) & (water_depth >= 0.0)
+
+    def _exposed_drainage_mask(self, frame: DemFrame, drainage_mask: np.ndarray) -> np.ndarray:
+        """Remove submerged channels when water-depth data are available."""
+
+        if frame.water_depth is None:
+            return drainage_mask
+        water_depth = np.asarray(frame.water_depth)
+        submerged = np.isfinite(water_depth) & (water_depth >= 0.0)
+        return drainage_mask & ~submerged
 
     def _label_components(
         self,

@@ -18,6 +18,8 @@ dist/
 
   # Papers / local references
 paper/
+PRIVATE_NOTES.md
+.local_notes/
 *.pptx
 *.pdf
 *.png
@@ -39,4 +41,3 @@ outputs/
 *.h5
 *.hdf5
 *.nc
-

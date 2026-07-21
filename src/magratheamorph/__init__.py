@@ -11,7 +11,15 @@ from .outputs import (
     write_zone_species_by_time_csv,
     zone_species_by_time_rows,
 )
-from .readers import DemFrame, read_ascii_dem, read_matrix_dem, read_vtk_dem, read_vtu_dem
+from .readers import (
+    DemFrame,
+    read_ascii_dem,
+    read_matrix_dem,
+    read_vtk_dem,
+    read_vtk_sea_level,
+    read_vtu_dem,
+    with_water_depth,
+)
 from .visualization import (
     format_species_label,
     plot_parent_daughter_tree,
@@ -48,6 +56,7 @@ __all__ = [
     "read_ascii_dem",
     "read_matrix_dem",
     "read_vtk_dem",
+    "read_vtk_sea_level",
     "read_vtu_dem",
     "remove_diagnostic_csvs",
     "validate_zone_species_rows",
@@ -61,6 +70,7 @@ __all__ = [
     "write_pvd_collection",
     "write_zone_species_by_time_csv",
     "write_vtk_series_collection",
+    "with_water_depth",
     "zone_labels_to_vtk_points",
     "zone_species_by_time_rows",
 ]

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import numpy as np
 
 from .outputs import remove_diagnostic_csvs, write_csv, write_zone_species_by_time_csv
 from .pipeline import run_frames
-from .readers import read_ascii_dem, read_matrix_dem, read_vtk_dem
+from .readers import read_ascii_dem, read_matrix_dem, read_vtk_dem, read_vtk_sea_level, with_water_depth
 from .zones import ZoneExtractor, compute_zone_transitions
 
 
@@ -28,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-drainage-area", type=float, required=True, help="Minimum drainage area for river habitat.")
     parser.add_argument(
         "--habitat-mode",
-        choices=["drainage", "elevation", "drainage_and_elevation"],
+        choices=["drainage", "elevation", "drainage_and_elevation", "drainage_or_shallow_lake"],
         default="drainage",
         help="Habitat mask source for zone extraction.",
     )
@@ -41,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--elevation-field", default=None, help="VTK/VTU point-data elevation field name. Defaults to topography, then elevation, then point z.")
     parser.add_argument("--drainage-area-field", default="drainage_area", help="VTK/VTU point-data drainage area field name.")
     parser.add_argument("--catchment-field", default="catchment", help="VTK/VTU point-data catchment field name.")
+    parser.add_argument("--sea-level-dir", default=None, help="Directory containing SeaLevel*.vtk files matched by numeric suffix.")
+    parser.add_argument("--sea-level-field", default="SL", help="VTK/VTU point-data sea-level field name.")
+    parser.add_argument("--min-lake-depth", type=float, default=0.0, help="Minimum water depth for shallow lake habitat.")
+    parser.add_argument("--max-lake-depth", type=float, default=None, help="Maximum water depth for shallow lake habitat.")
     parser.add_argument("--write-diagnostics", action="store_true", help="Write detailed diagnostic CSV tables.")
     parser.add_argument("--write-rasters", action="store_true", help="Write NumPy zone and richness rasters.")
     return parser
@@ -55,22 +60,26 @@ def main(argv: list[str] | None = None) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     frames = []
+    sea_level_dir = Path(args.sea_level_dir) if args.sea_level_dir is not None else None
     for index, input_path in enumerate(args.inputs):
         time = index * args.dt
         if args.format == "ascii":
-            frames.append(read_ascii_dem(input_path, time=time))
+            frame = read_ascii_dem(input_path, time=time)
         elif args.format == "matrix":
-            frames.append(read_matrix_dem(input_path, time=time, cell_size=args.cell_size))
+            frame = read_matrix_dem(input_path, time=time, cell_size=args.cell_size)
         else:
-            frames.append(
-                read_vtk_dem(
-                    input_path,
-                    time=time,
-                    elevation_field=args.elevation_field,
-                    drainage_area_field=args.drainage_area_field,
-                    catchment_field=args.catchment_field,
-                )
+            frame = read_vtk_dem(
+                input_path,
+                time=time,
+                elevation_field=args.elevation_field,
+                drainage_area_field=args.drainage_area_field,
+                catchment_field=args.catchment_field,
             )
+            if sea_level_dir is not None:
+                sea_level_path = _matching_sea_level_path(input_path, sea_level_dir)
+                sea_level = read_vtk_sea_level(sea_level_path, sea_level_field=args.sea_level_field)
+                frame = with_water_depth(frame, sea_level)
+        frames.append(frame)
 
     extractor = ZoneExtractor(
         min_drainage_area=args.min_drainage_area,
@@ -81,6 +90,8 @@ def main(argv: list[str] | None = None) -> None:
         min_zone_cells=args.min_zone_cells,
         gap_tolerance_cells=args.gap_tolerance_cells,
         habitat_mode=args.habitat_mode,
+        min_lake_depth=args.min_lake_depth,
+        max_lake_depth=args.max_lake_depth,
     )
     model, zone_maps = run_frames(
         frames,
@@ -138,3 +149,20 @@ def _write_transitions(path: Path, zone_maps) -> None:
                 }
             )
     write_csv(path, rows)
+
+
+def _matching_sea_level_path(input_path: str | Path, sea_level_dir: Path) -> Path:
+    input_path = Path(input_path)
+    match = re.search(r"(\d+)$", input_path.stem)
+    if match is None:
+        raise ValueError(f"could not infer numeric timestep suffix from {input_path.name!r}")
+    suffix = match.group(1)
+    candidates = [
+        sea_level_dir / f"SeaLevel{suffix}{input_path.suffix}",
+        sea_level_dir / f"SeaLevel{suffix}.vtk",
+        sea_level_dir / f"SeaLevel{suffix}.vtu",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"no SeaLevel file with suffix {suffix} found in {sea_level_dir}")

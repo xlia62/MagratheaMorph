@@ -1,7 +1,7 @@
 import numpy as np
 
 from magratheamorph.hydrology import compute_d8_hydrology
-from magratheamorph.readers import DemFrame
+from magratheamorph.readers import DemFrame, with_water_depth
 from magratheamorph.zones import ZoneExtractor
 
 
@@ -75,6 +75,147 @@ def test_zone_extractor_drainage_and_elevation_mode_intersects_masks():
 
     assert len(zone_map.zones) == 1
     assert zone_map.habitat_mask.tolist() == [[False, True, False, False]]
+
+
+def test_with_water_depth_computes_positive_submerged_depths():
+    frame = DemFrame(
+        time=0,
+        elevation=np.array([[90.0, 100.0, 110.0]]),
+        x=np.arange(3),
+        y=np.arange(1),
+    )
+
+    out = with_water_depth(frame, 100.0)
+
+    assert out.water_depth.tolist() == [[10.0, 0.0, -10.0]]
+
+
+def test_zone_extractor_drainage_or_shallow_lake_unions_masks():
+    frame = DemFrame(
+        time=0,
+        elevation=np.zeros((1, 4)),
+        x=np.arange(4),
+        y=np.arange(1),
+        drainage_area=np.array([[10.0, 1.0, 10.0, 1.0]]),
+        water_depth=np.array([[-5.0, 10.0, 40.0, 40.0]]),
+    )
+    extractor = ZoneExtractor(
+        min_drainage_area=5.0,
+        habitat_mode="drainage_or_shallow_lake",
+        min_lake_depth=0.0,
+        max_lake_depth=30.0,
+        connectivity=4,
+    )
+    zone_map = extractor.extract(frame)
+
+    assert zone_map.habitat_mask.tolist() == [[True, True, False, False]]
+    assert len(zone_map.zones) == 1
+
+
+def test_zone_extractor_drainage_or_shallow_lake_removes_submerged_rivers():
+    frame = DemFrame(
+        time=0,
+        elevation=np.zeros((1, 3)),
+        x=np.arange(3),
+        y=np.arange(1),
+        drainage_area=np.array([[10.0, 10.0, 10.0]]),
+        water_depth=np.array([[-1.0, 10.0, 40.0]]),
+    )
+    extractor = ZoneExtractor(
+        min_drainage_area=5.0,
+        habitat_mode="drainage_or_shallow_lake",
+        max_lake_depth=30.0,
+        connectivity=4,
+    )
+    zone_map = extractor.extract(frame)
+
+    assert zone_map.habitat_mask.tolist() == [[True, False, False]]
+
+
+def test_zone_extractor_drainage_mode_removes_submerged_rivers_when_depth_available():
+    frame = DemFrame(
+        time=0,
+        elevation=np.zeros((1, 3)),
+        x=np.arange(3),
+        y=np.arange(1),
+        drainage_area=np.array([[10.0, 10.0, 10.0]]),
+        water_depth=np.array([[-1.0, 0.0, 40.0]]),
+    )
+    extractor = ZoneExtractor(
+        min_drainage_area=5.0,
+        habitat_mode="drainage",
+        connectivity=4,
+    )
+    zone_map = extractor.extract(frame)
+
+    assert zone_map.habitat_mask.tolist() == [[True, False, False]]
+
+
+def test_zone_extractor_shallow_lake_mode_requires_depth_inputs():
+    frame = DemFrame(
+        time=0,
+        elevation=np.zeros((1, 1)),
+        x=np.arange(1),
+        y=np.arange(1),
+        drainage_area=np.array([[0.0]]),
+    )
+    extractor = ZoneExtractor(
+        min_drainage_area=5.0,
+        habitat_mode="drainage_or_shallow_lake",
+        max_lake_depth=30.0,
+    )
+
+    try:
+        extractor.extract(frame)
+    except ValueError as exc:
+        assert "water_depth" in str(exc)
+    else:
+        raise AssertionError("missing water_depth should fail")
+
+
+def test_zone_extractor_shallow_lake_mode_requires_max_depth():
+    frame = DemFrame(
+        time=0,
+        elevation=np.zeros((1, 1)),
+        x=np.arange(1),
+        y=np.arange(1),
+        drainage_area=np.array([[0.0]]),
+        water_depth=np.array([[1.0]]),
+    )
+    extractor = ZoneExtractor(
+        min_drainage_area=5.0,
+        habitat_mode="drainage_or_shallow_lake",
+    )
+
+    try:
+        extractor.extract(frame)
+    except ValueError as exc:
+        assert "max_lake_depth" in str(exc)
+    else:
+        raise AssertionError("missing max_lake_depth should fail")
+
+
+def test_zone_extractor_drainage_or_shallow_lake_ignores_catchment_splits():
+    frame = DemFrame(
+        time=0,
+        elevation=np.zeros((1, 2)),
+        x=np.arange(2),
+        y=np.arange(1),
+        drainage_area=np.array([[0.0, 0.0]]),
+        catchment=np.array([[1, 2]]),
+        water_depth=np.array([[10.0, 10.0]]),
+    )
+    extractor = ZoneExtractor(
+        min_drainage_area=5.0,
+        habitat_mode="drainage_or_shallow_lake",
+        max_lake_depth=30.0,
+        use_catchments=True,
+        connectivity=4,
+    )
+    zone_map = extractor.extract(frame)
+
+    assert len(zone_map.zones) == 1
+    assert zone_map.zones[0].area_cells == 2
 
 
 def test_zone_extractor_elevation_only_mode_ignores_catchments():

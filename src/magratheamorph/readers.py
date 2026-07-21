@@ -25,6 +25,9 @@ class DemFrame:
         Optional 2-D drainage area raster.
     catchment
         Optional 2-D catchment ID raster.
+    water_depth
+        Optional 2-D water-depth raster. Positive values are submerged depths
+        below the water surface; dry cells should be negative.
     metadata
         Optional input-specific metadata.
     """
@@ -35,6 +38,7 @@ class DemFrame:
     y: np.ndarray
     drainage_area: np.ndarray | None = None
     catchment: np.ndarray | None = None
+    water_depth: np.ndarray | None = None
     metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -42,7 +46,7 @@ class DemFrame:
         if elevation.ndim != 2:
             raise ValueError("elevation must be a 2-D array")
 
-        for name in ("drainage_area", "catchment"):
+        for name in ("drainage_area", "catchment", "water_depth"):
             value = getattr(self, name)
             if value is not None and np.asarray(value).shape != elevation.shape:
                 raise ValueError(f"{name} must match elevation shape")
@@ -270,6 +274,49 @@ def read_vtu_dem(
         elevation_field=elevation_field,
         drainage_area_field=drainage_area_field,
         catchment_field=catchment_field,
+    )
+
+
+def read_vtk_sea_level(
+    path: str | Path,
+    sea_level_field: str = "SL",
+) -> np.ndarray:
+    """Read a FastScape/ASPECT sea-level VTK/VTU scalar as a 2-D raster."""
+
+    return read_vtk_dem(
+        path,
+        elevation_field=sea_level_field,
+        drainage_area_field=None,
+        catchment_field=None,
+    ).elevation
+
+
+def with_water_depth(frame: DemFrame, sea_level: float | np.ndarray) -> DemFrame:
+    """Return a copy of ``frame`` with water depth computed from sea level.
+
+    Depth is positive below water and negative for dry cells:
+    ``water_depth = sea_level - elevation``.
+    """
+
+    sea_level_array = np.asarray(sea_level)
+    if sea_level_array.ndim == 0:
+        water_depth = float(sea_level_array) - np.asarray(frame.elevation)
+    else:
+        if sea_level_array.shape != frame.elevation.shape:
+            raise ValueError("sea_level raster must match frame elevation shape")
+        water_depth = sea_level_array - np.asarray(frame.elevation)
+
+    metadata = dict(frame.metadata or {})
+    metadata["water_depth_source"] = "sea_level_minus_elevation"
+    return DemFrame(
+        time=frame.time,
+        elevation=frame.elevation,
+        x=frame.x,
+        y=frame.y,
+        drainage_area=frame.drainage_area,
+        catchment=frame.catchment,
+        water_depth=water_depth,
+        metadata=metadata,
     )
 
 

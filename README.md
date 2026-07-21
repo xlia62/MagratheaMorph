@@ -63,6 +63,31 @@ magratheamorph Topography0000250.vtk Topography0000500.vtk Topography0000750.vtk
   --output-dir output/speciation
 ```
 
+ASPECT/FastScape river plus shallow-lake habitat:
+
+```bash
+magratheamorph Topography0000000.vtk Topography0000005.vtk Topography0000010.vtk \
+  --format vtk \
+  --dt 1000 \
+  --time-to-speciation 10000 \
+  --min-drainage-area 100000 \
+  --habitat-mode drainage_or_shallow_lake \
+  --sea-level-dir /path/to/fastscape \
+  --sea-level-field SL \
+  --max-lake-depth 30 \
+  --min-zone-cells 25 \
+  --output-dir output/river_lake_speciation
+```
+
+In `drainage_or_shallow_lake` mode, habitat is the union of exposed river cells
+(`drainage_area >= min_drainage_area` and `sea_level - elevation < 0`) and
+shallow submerged lake cells that are not drainage/channel cells
+(`0 <= sea_level - elevation <= max_lake_depth` and
+`drainage_area < min_drainage_area`). Submerged channels are removed entirely,
+so rivers beneath lake water do not create river-related or lake-related zones.
+Sea-level files are matched to topography files by numeric suffix, for example
+`Topography0000120.vtk` uses `SeaLevel0000120.vtk`.
+
 For ASPECT/FastScape VTK/VTU files, Magratheamorph reads point-data fields through `meshio`. Elevation is auto-detected from `topography`, then `elevation`, then point z. `drainage_area` and `catchment` are used automatically when present.
 
 Outputs include CSV tables for species, final populations, range history, events, zones, and zone transitions, plus NumPy arrays for zone labels and richness maps.
@@ -87,3 +112,4 @@ The notebook [notebooks/five_step_allopatric_vicariance_scenarios.ipynb](noteboo
 - If VTK/VTU files contain drainage area and catchment fields, those are used directly.
 - If only elevation is available, the package computes a minimal D8 drainage area internally.
 - Elevation filters define fish habitat bounds in v1; elevation does not yet drive adaptive speciation.
+- Shallow-lake depth filtering requires a sea-level raster or scalar on the same grid and vertical datum as topography.

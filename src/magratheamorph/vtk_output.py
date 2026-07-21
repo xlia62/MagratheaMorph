@@ -16,13 +16,16 @@ def write_legacy_vtk_with_point_fields(
     input_path: str | Path,
     output_path: str | Path,
     fields: dict[str, np.ndarray],
+    preserve_existing_point_data: bool = True,
 ) -> None:
     """Copy a legacy structured-grid VTK file and append point-data fields.
 
-    The original file bytes are preserved exactly. New scalar fields are
-    appended to the existing ``POINT_DATA`` section as big-endian binary VTK
-    arrays. Field values may be provided either as 1-D arrays in original VTK
-    point order, or as 2-D Magratheamorph rasters with shape ``(ny, nx)``.
+    By default, the original file bytes are preserved exactly and new scalar
+    fields are appended to the existing ``POINT_DATA`` section as big-endian
+    binary VTK arrays. If ``preserve_existing_point_data`` is False, original
+    point-data fields are stripped and only the supplied fields are written.
+    Field values may be provided either as 1-D arrays in original VTK point
+    order, or as 2-D Magratheamorph rasters with shape ``(ny, nx)``.
     """
 
     input_path = Path(input_path)
@@ -32,7 +35,13 @@ def write_legacy_vtk_with_point_fields(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     original = input_path.read_bytes()
     with output_path.open("wb") as f:
-        f.write(original)
+        if preserve_existing_point_data:
+            f.write(original)
+        else:
+            f.write(original[: info["points_end_offset"]])
+            if not original[: info["points_end_offset"]].endswith(b"\n"):
+                f.write(b"\n")
+            f.write(f"POINT_DATA       {info['npoints']}\n".encode("ascii"))
         if not original.endswith(b"\n"):
             f.write(b"\n")
         for name, values in fields.items():
@@ -208,6 +217,7 @@ def inspect_legacy_structured_grid_vtk(path: str | Path) -> dict[str, Any]:
     if pos + point_bytes > len(data):
         raise ValueError("legacy VTK POINTS data is truncated")
     points = np.frombuffer(data, dtype=point_dtype, count=point_count, offset=pos).astype(float).reshape(npoints, 3)
+    points_end_offset = pos + point_bytes
 
     return {
         "path": str(path),
@@ -216,6 +226,7 @@ def inspect_legacy_structured_grid_vtk(path: str | Path) -> dict[str, Any]:
         "npoints": npoints,
         "point_count": npoints,
         "points": points,
+        "points_end_offset": points_end_offset,
     }
 
 
