@@ -33,6 +33,7 @@ notebooks/magrathea_vtk_*_output/
 *.npy
 *.npz
 *.csv
+.DS_Store
 
   # Large/local data
 data/
